@@ -54,6 +54,10 @@ class QSimPyEnv(gym.Env):
         """
         
         super().__init__()
+        if dataset is None:
+            raise ValueError("Dataset is not specified")
+        
+        self.dataset_path = dataset
 
         # OBSERVATION SPACE
         # Each observation is a dict of qtask_attributes and qnode_attributes
@@ -63,6 +67,7 @@ class QSimPyEnv(gym.Env):
         self.n_qnodes = 5  # number of qnodes
         self.qtasks = []
         self.qnodes = []
+        self.serviced_qtasks = []
         self.mode = mode
         self.obs_dim = 4 + self.n_qnodes * 3
         self.observation_space = Box(
@@ -79,37 +84,36 @@ class QSimPyEnv(gym.Env):
 
         # Assuming the observation consists of [arrival_time, qubit_number, circuit_layers] for tasks
         # and [qubit_number, clops, next_available_time] for each node
-        task_obs_low = np.array([0, 0, 0, 0], dtype=np.float64)
+        task_obs_low = np.array([0, 0, 0, 0], dtype=np.float32)
         task_obs_high = np.array(
-            [max_time, max_qubits, max_layers, max_rescheduling_count], dtype=np.float64
+            [max_time, max_qubits, max_layers, max_rescheduling_count], dtype=np.float32
         )
-        node_obs_low = np.array([0, 0, -1] * self.n_qnodes, dtype=np.float64)
+        node_obs_low = np.array([0, 0, -1] * self.n_qnodes, dtype=np.float32)
         node_obs_high = np.array(
-            [max_qubits, max_clops, max_time] * self.n_qnodes, dtype=np.float64
+            [max_qubits, max_clops, max_time] * self.n_qnodes, dtype=np.float32
         )
 
         # Combine to form the complete observation space
-        obs_low = np.concatenate([task_obs_low, node_obs_low]).astype(np.float64)
-        obs_high = np.concatenate([task_obs_high, node_obs_high]).astype(np.float64)
+        obs_low = np.concatenate([task_obs_low, node_obs_low]).astype(np.float32)
+        obs_high = np.concatenate([task_obs_high, node_obs_high]).astype(np.float32)
 
-        self.observation_space = Box(low=obs_low, high=obs_high, dtype=np.float64)
+        self.observation_space = Box(low=obs_low, high=obs_high, dtype=np.float32)
         self.current_obs = None
 
         # ACTION SPACE
         self.action_space = Discrete(self.n_qnodes)
 
         # Load QTasks dataset
-        if dataset is None:
-            raise ValueError("Dataset is not specified")
-        self.qtask_dataset = Dataset(dataset)
-        self.rng = default_rng(seed=22)
+        self.qtask_dataset = Dataset(self.dataset_path)
+        self.seed = 22
+        self.rng = default_rng(seed=self.seed)
+        
         # QSimPy environment
         self.qsp_env = simpy.Environment()
         self.setup_quantum_resources()
 
         # Round
         self.round = 1
-        self.seed = 22
         self.round_robin_index = 0
         self.results = [] 
         
@@ -117,10 +121,47 @@ class QSimPyEnv(gym.Env):
         self.rescheduling_time = 0.01
 
         # Check if evaluation is set
+        if config is None:
+            config = {}
         self.evaluation = config.get("evaluation", False)
         self.policy = config.get("policy", "UnknownPolicy")
         
 
+    def __getstate__(self):
+        """
+        This method prepares the object for serialization (pickling).
+        We remove all objects that cannot be pickled.
+        """
+        state = self.__dict__.copy()
+        
+        # List of attributes to remove before pickling
+        unpicklable_attributes = [
+            'qsp_env', 
+            'broker', 
+            'qnodes', 
+            'rng', 
+            'qtask_dataset'
+        ]
+        
+        for attr in unpicklable_attributes:
+            if attr in state:
+                del state[attr]
+                
+        return state
+
+    def __setstate__(self, state):
+        """
+        This method restores the object after serialization.
+        We re-initialize the objects that we removed in __getstate__.
+        """
+        self.__dict__.update(state)
+        
+        # Re-initialize the unpicklable attributes
+        self.qtask_dataset = Dataset(self.dataset_path)
+        self.rng = default_rng(seed=self.seed)
+        self.qsp_env = simpy.Environment()
+        self.setup_quantum_resources()
+    
     def _get_obs(self):
         """
         Get the current observation of the environment.
@@ -130,7 +171,7 @@ class QSimPyEnv(gym.Env):
         """
         # Get the current observation of quantum task
         if self.current_qtask is None:
-            self.qtask_obs = np.array([0, 0, 0, 0], dtype=np.float64)
+            self.qtask_obs = np.array([0, 0, 0, 0], dtype=np.float32)
         else:
             self.qtask_obs = np.array(
                 [
@@ -139,7 +180,7 @@ class QSimPyEnv(gym.Env):
                     self.current_qtask.circuit_layers,
                     self.current_qtask.rescheduling_count,
                 ],
-                dtype=np.float64,
+                dtype=np.float32,
             )
 
         # Get the current observation of quantum nodes
@@ -151,14 +192,14 @@ class QSimPyEnv(gym.Env):
                     qnode.clops,
                     qnode.next_available_time,
                 ],
-                dtype=np.float64,
+                dtype=np.float32,
             )
             self.qnode_obs.append(qnode_obs)
 
         # Flatten the qnode observations and concatenate with qtask observations
-        qnode_obs_flat = np.concatenate(self.qnode_obs).astype(np.float64)
+        qnode_obs_flat = np.concatenate(self.qnode_obs).astype(np.float32)
         self.current_obs = np.concatenate(
-            (self.qtask_obs, qnode_obs_flat), dtype=np.float64
+            (self.qtask_obs, qnode_obs_flat), dtype=np.float32
         )
         return self.current_obs
 
@@ -177,6 +218,10 @@ class QSimPyEnv(gym.Env):
             for qid, qname in zip(qnode_ids, qnode_names)
         ]
 
+        # Manually assign the name attribute to each node after creation
+        for node, name in zip(self.qnodes, qnode_names):
+            node.name = name
+        
         # Create a Broker
         self.broker = Broker(self.qsp_env, self.qnodes, self.mode)
 
@@ -221,22 +266,22 @@ class QSimPyEnv(gym.Env):
         self.round += 1
 
     def submit_task_to_qnode(self, qtask, qnode_id=None):
-        reward = 0
         if qnode_id is None:
             qnode_id = self.round_robin_index % self.n_qnodes
             self.round_robin_index += 1
+
+        # Check for task validity against the chosen node
         qtask, waiting_time, execution_time = self.broker.preprocess_qtask(
             qtask, self.qnodes[qnode_id]
         )
+
         if qtask.status == TaskStatus.ERROR:
-            # Apply large penalty to the reward if QTask constraints are not satisfied
-            # Beside, this task need to be rescheduled to another QNode until it can be executed
-            # Put this task back to the queue
+            # Handle infeasible scheduling
             qtask.status = TaskStatus.QUEUED
             qtask.QNode = None
             qtask.rescheduling_count += 1
-            qtask.arrival_time += 1
-            # Find the index to insert the qtask based on arrival_time
+            qtask.arrival_time = self.qsp_env.now + self.rescheduling_time
+            
             index = 0
             while (
                 index < len(self.qtasks)
@@ -244,29 +289,64 @@ class QSimPyEnv(gym.Env):
             ):
                 index += 1
             self.qtasks.insert(index, qtask)
+            
+            self.qsp_env.run(until=self.qsp_env.now + self.rescheduling_time)
             return -0.1, qtask.rescheduling_count
-        # Submit the qtask to the qnode following the action
+        
+        # If valid, schedule the task
         qtask_execution = self.broker.submit_qtask_to_qnode(
             qtask, self.qnodes[qnode_id]
         )
         self.qsp_env.process(qtask_execution)
-        # Delay time is the time from initial arrival time to the time the task started to be placed in the QNode
-        delay_time = qtask.arrival_time - qtask.init_arrival_time
         
-        # print(f"Estimated waiting time: {waiting_time}")
-        # print(f"Estimated execution time: {execution_time}")
+        # --- START OF FIX ---
+        # Calculate all timing info BEFORE running the simulation
+        
+        # The task will start after the current time + its waiting time.
+        start_time = self.qsp_env.now + waiting_time
+        
+        # We can store this on the object now for logging purposes.
+        qtask.start_time = start_time
+        
+        # Calculate the exact time the simulation needs to run until.
+        completion_time = start_time + execution_time
+        
+        # Calculate the delay from the task's very first arrival.
+        delay_time = start_time - qtask.init_arrival_time
+        
+        # --- END OF FIX ---
+
+        # NOW, run the simulation until this specific task is done
+        self.qsp_env.run(until=completion_time)
+        
         self.results.append({
             'qtask_id': qtask.id,
             'qnode_id': qnode_id,
             'waiting_time': waiting_time,
             'execution_time': execution_time,
-            'rescheduling_count': qtask.rescheduling_count,  # Store the actual count from the task
+            'rescheduling_count': qtask.rescheduling_count,
         })
-        reward = delay_time + waiting_time + execution_time
-        return reward, qtask.rescheduling_count
+        
+        self.serviced_qtasks.append(qtask)
+        
+        # The reward is based on the total time spent by the task in the system
+        total_time_in_system = delay_time + waiting_time + execution_time
+
+        return total_time_in_system, qtask.rescheduling_count
 
     def reset(self, *, seed=None, options=None):
-        super().reset(seed=22)
+        super().reset(seed=seed)
+        if seed is not None:
+            self.seed = seed
+        
+        # Re-initialize the entire simulation environment
+        self.qsp_env = simpy.Environment()
+        self.rng = default_rng(seed=self.seed)
+        self.setup_quantum_resources()
+        self.results = []
+        self.round = 1
+        self.serviced_qtasks = [] 
+        
         self.generate_qtasks()
         self.current_obs = self._get_obs().astype(np.float32)
         info = {}
@@ -298,29 +378,36 @@ class QSimPyEnv(gym.Env):
         return summary
 
     def step(self, action):
-        # Submit the current qtask to the selected qnode
-        # action is qnode_id
-        # Intermediately reward is the inverse of completion time
-        # Sample Objective: Minimize the total completion time of all qtasks
+        # Submit the current qtask to the selected qnode and run the simulation
+        # The returned `time_reward` is the total time the task spent in the system
         time_reward, _ = self.submit_task_to_qnode(
             self.current_qtask, action
         )
-        reward = 1/time_reward
+
+        # A reward of -0.1 indicates a penalty for an invalid action
+        if time_reward == -0.1:
+            reward = -0.1
+        else:
+            # The objective is to MINIMIZE completion time, so the reward should be inverse
+            # Add a small epsilon to avoid division by zero
+            reward = 1.0 / (time_reward + 1e-6)
 
         scheduled_qtask = self.current_qtask
 
         # Get the next observation
-        # Check if there are more qtasks, if yes, get the next qtask, otherwise set terminated to True
         if len(self.qtasks) > 0:
             self.current_qtask = self.qtasks.pop(0)
+            # Advance simulation time to the arrival of the next task if needed
+            if self.qsp_env.now < self.current_qtask.arrival_time:
+                self.qsp_env.run(until=self.current_qtask.arrival_time)
             terminated = False
         else:
             self.current_qtask = None
             terminated = True
 
         self.current_obs = self._get_obs()
-
-        return self.current_obs, reward, terminated, False, {"scheduled_qtask": scheduled_qtask}
+        info = {"scheduled_qtask_id": scheduled_qtask.id}
+        return self.current_obs, reward, terminated, False, info
 
     def close(self):
         # If the evaluation is set, run the environment and export the results

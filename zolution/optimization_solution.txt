@@ -1,0 +1,78 @@
+└──Optimization problems
+    |
+    └── Generalized Assignment Problem (GAP)
+
+✅✅
+
+└──Objective Functions:
+
+    These are the values your algorithm actively 
+    tries to minimize or maximize when making a decision. 
+
+    ├──Time-Based Objectives
+    |   ├──Makespan: "How quickly can we finish this entire batch of tasks?
+    |   ├──Total Completion Time (Flow Time): The sum of the time each task spends in the system from arrival to completion.
+    |   └──Total Tardiness: Used when tasks have deadlines. It measures how late tasks are, ignoring those that finish on time.
+    |
+    ├──Quality & Cost-Based Objectives
+    |   ├──Total Error / Failure Probability: Minimizes the sum of errors for all assignments
+    |   └──Total Execution Cost: If running on different QCs has a monetary cost
+    |
+    └──Multi-Objective Functions
+        └──Weighted Sum:you care about both time and quality. 
+                A multi-objective function combines these using weights to reflect your priorities.
+
+                a * (normalized time metric) + b * (normalized Error Metric)
+
+
+
+└──solutions:
+
+
+└── Algorithms
+    │
+    ├── Classification by GUARANTEE
+    │   ├── Exact Algorithm (Perfect solution)
+    │   ├── Approximation Algorithm (Provably good solution, 10% worst than optimal)
+    │   └── Heuristic (A 'good enough' shortcut with no guarantee)
+    │       ├── Simple Heuristics (Human-designed rules)
+    │       ├── Metaheuristics (Strategies to guide simple heuristics)
+    │       └── Machine Learning Models (Learned, data-driven heuristics)
+    |
+    |
+    └── Classification by DESIGN PARADIGM
+        ├── Brute-force (Often used for Exact algorithms)
+        ├── Greedy (Can be Exact for some problems, a Heuristic for others)
+        ├── Divide and Conquer (A powerful paradigm for creating Exact algorithms)
+        ├── Dynamic Programming (Another powerful paradigm for Exact optimization)
+        ├── Backtracking
+        └── Randomized Algorithms (Often used in advanced Heuristics)
+
+
+
+
+
+Evaluation Metrics:
+    These are the Key Performance Indicators (KPIs) you use after a simulation
+    or run to analyze and compare the performance of different dispatching strategies.
+
+    ├──System Performance Metrics
+    |   ├──Average Wait Time: The average time tasks spent in the queue before execution.
+    |   ├──Average Turnaround Time: The average time from a task's submission to its completion
+    |   ├──Throughput: The number of tasks completed per unit of time (e.g., tasks per hour)
+    |   └──Makespan:Also used as an evaluation metric to see how long the whole process took.
+    |
+    ├──System Utilization Metrics
+    |   ├──Average QC Utilization: The percentage of time that the quantum computers are busy 
+    |   └──Queue Length Statistics
+    |       ├──Average Queue Length
+    |       ├──Maximum Queue Length
+    |       └──Variance in Queue Length
+    |
+    └──Quality and Fairness Metrics
+        ├──Success Rate: The percentage of executed tasks that were expected to succeed based on fidelity.
+        ├──Number of Failed Tasks: A direct count of tasks that were assigned to a QC but failed.
+        ├──Starvation: The number of tasks that had to wait longer than a certain threshold.
+        └──Jain's Fairness Index:if resources are distributed equitably among different users or task types.
+     
+

@@ -26,6 +26,7 @@ logs/
 
 # Dependency directories
 venv/
+.venv/
 env/
 env.bak/
 env.tmp/
@@ -47,3 +48,5 @@ Thumbs.db
 
 # QASM files
 *.qasm
+
+results/*

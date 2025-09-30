@@ -16,7 +16,7 @@ skipped_list = []
 
 
 def enhanced_greedy_policy(env, skipped_list):
-    current_obs = env.current_obs
+    current_obs = env.unwrapped.current_obs
     qnode_start_index = 4  # Adjust based on the actual qtask observation length
     qnode_obs_length = 3  # Number of values per qnode in the observation
 
